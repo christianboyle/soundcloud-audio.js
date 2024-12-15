@@ -1,0 +1,6 @@
+const config = {
+  clientId: 'xxxxxxxxxxxxxx',
+  clientSecret: 'xxxxxxxxxxxxxx'
+};
+
+export default config;
