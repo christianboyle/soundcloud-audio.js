@@ -8,18 +8,19 @@
     <div id="track">Loading..</div>
 
     <script src="../dist/soundcloud-audio.js"></script>
-    <script>
+    <script type="module">
+      import config from '../config.js';
+      
       (function(global) {
         'use strict';
 
         var $view = document.getElementById('track');
-        
+        var player = (global.player = new SoundCloudAudio());
+        var currentToken = null;
+
         // Initialize player
         var player = (global.player = new SoundCloudAudio());
         
-        // Import config
-        import config from '../config.js';
-
         // Add refresh token function
         function refreshToken() {
           return fetch('https://api.soundcloud.com/oauth2/token', {
@@ -168,24 +169,29 @@
           $view.appendChild($button);
         };
 
-        try {
-          player.resolve(
-            'https://soundcloud.com/kosmetism/soul-survivor',
-            function(track) {
-              try {
-                render(track);
-              } catch (e) {
-                console.error('Render error:', e);
-                $view.innerHTML = 'Error rendering track: ' + e.message;
+        // Wrap the initial resolve in the token refresh
+        refreshToken().then(token => {
+          currentToken = token;
+          
+          try {
+            player.resolve(
+              'https://soundcloud.com/kosmetism/soul-survivor',
+              function(track) {
+                try {
+                  render(track);
+                } catch (e) {
+                  console.error('Render error:', e);
+                  $view.innerHTML = 'Error rendering track: ' + e.message;
+                }
               }
-            }
-          );
-        } catch (e) {
-          console.error('Resolve error:', e);
-          $view.innerHTML = 'Error resolving track: ' + e.message;
-        }
+            );
+          } catch (e) {
+            console.error('Resolve error:', e);
+            $view.innerHTML = 'Error resolving track: ' + e.message;
+          }
+        });
 
-      })(this);
+      })(window);
     </script>
   </body>
 </html>
