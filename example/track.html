@@ -2,7 +2,7 @@
 <html>
   <head>
     <meta charset="utf-8" />
-    <title></title>
+    <title>SoundCloud Track Player</title>
   </head>
   <body>
     <div id="track">Loading..</div>
@@ -13,10 +13,89 @@
         'use strict';
 
         var $view = document.getElementById('track');
-        var player = (global.player = new SoundCloudAudio(
-          null,
-          'https://sc-api-proxy.herokuapp.com'
-        ));
+        
+        // Initialize player
+        var player = (global.player = new SoundCloudAudio());
+        
+        // Import config
+        import config from '../config.js';
+
+        // Add refresh token function
+        function refreshToken() {
+          return fetch('https://api.soundcloud.com/oauth2/token', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/x-www-form-urlencoded'
+            },
+            body: `grant_type=client_credentials&client_id=${config.clientId}&client_secret=${config.clientSecret}`
+          })
+          .then(response => response.json())
+          .then(data => {
+            console.log('New token received');
+            return data.access_token;
+          })
+          .catch(error => {
+            console.error('Error refreshing token:', error);
+          });
+        }
+
+        // Modify _json method to handle token refresh
+        player._json = function(url, callback) {
+          console.log('Making request to:', url);
+          var xhr = new XMLHttpRequest();
+          xhr.open('GET', url);
+          
+          xhr.setRequestHeader('Authorization', 'OAuth ' + currentToken);
+          
+          xhr.onreadystatechange = function() {
+            if (xhr.readyState === 4) {
+              if (xhr.status === 401) {
+                // Token expired, refresh and retry
+                refreshToken().then(newToken => {
+                  currentToken = newToken;
+                  // Retry the original request
+                  player._json(url, callback);
+                });
+              } else if (xhr.status === 200) {
+                try {
+                  callback(JSON.parse(xhr.responseText));
+                } catch (err) {
+                  console.error('Parse error:', err);
+                }
+              } else {
+                console.error('Request failed:', xhr.status, xhr.responseText);
+              }
+            }
+          };
+
+          xhr.send(null);
+        };
+
+        // Override the resolve method to use the new API format
+        player.resolve = function(url, callback) {
+          var resolveUrl = this._baseUrl + '/resolve?url=' + encodeURIComponent(url);
+          
+          this._json(resolveUrl, function(data) {
+            this.cleanData();
+
+            if (Array.isArray(data)) {
+              data = { tracks: data };
+            }
+
+            if (data.tracks) {
+              data.tracks = data.tracks.map(this._transformTrack.bind(this));
+              this._playlist = data;
+            } else {
+              this._track = this._transformTrack(data);
+            }
+
+            this.duration = data.duration && !isNaN(data.duration)
+              ? data.duration / 1000
+              : 0;
+
+            callback(data);
+          }.bind(this));
+        };
 
         var prettyTime = function(time) {
           var hours = Math.floor(time / 3600);
@@ -37,6 +116,13 @@
         };
 
         var render = function(track) {
+          console.log('Track loaded:', track); // Debug log
+          
+          if (!track) {
+            $view.innerHTML = 'Failed to load track data';
+            return;
+          }
+
           // track info
           var $info = document.createElement('h3');
           $info.innerText =
@@ -50,7 +136,6 @@
               '/' +
               prettyTime(player.duration);
           };
-          // rerender timer on every second
           player.on('timeupdate', renderTimer);
           renderTimer();
           $info.appendChild($timer);
@@ -83,10 +168,23 @@
           $view.appendChild($button);
         };
 
-        player.resolve(
-          'https://soundcloud.com/kosmetism/soul-survivor',
-          render
-        );
+        try {
+          player.resolve(
+            'https://soundcloud.com/kosmetism/soul-survivor',
+            function(track) {
+              try {
+                render(track);
+              } catch (e) {
+                console.error('Render error:', e);
+                $view.innerHTML = 'Error rendering track: ' + e.message;
+              }
+            }
+          );
+        } catch (e) {
+          console.error('Resolve error:', e);
+          $view.innerHTML = 'Error resolving track: ' + e.message;
+        }
+
       })(this);
     </script>
   </body>

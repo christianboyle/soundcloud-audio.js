@@ -1,0 +1,205 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>SoundCloud Playlist Player</title>
+    <style>
+      .playlist {
+        max-width: 800px;
+        margin: 0 auto;
+        padding: 20px;
+      }
+      .playlist-header {
+        margin-bottom: 20px;
+        display: flex;
+        gap: 20px;
+      }
+      .playlist-artwork {
+        width: 200px;
+        height: 200px;
+        background: #eee;
+      }
+      .playlist-artwork img {
+        width: 100%;
+        height: 100%;
+        object-fit: cover;
+      }
+      .playlist-details {
+        flex: 1;
+      }
+      .playlist-title {
+        font-size: 24px;
+        margin-bottom: 10px;
+      }
+      .playlist-title a {
+        color: #333;
+        text-decoration: none;
+      }
+      .playlist-title a:hover {
+        color: #ff5500;
+      }
+      .playlist-info {
+        color: #666;
+        margin-bottom: 5px;
+      }
+      .track-list {
+        list-style: none;
+        padding: 0;
+      }
+      .track-item {
+        display: flex;
+        align-items: center;
+        padding: 10px;
+        border-bottom: 1px solid #eee;
+      }
+      .track-item:hover {
+        background: #f5f5f5;
+      }
+      .track-artwork {
+        width: 50px;
+        height: 50px;
+        margin-right: 15px;
+      }
+      .track-info {
+        flex-grow: 1;
+      }
+      .track-title {
+        font-weight: bold;
+        margin-bottom: 5px;
+      }
+      .track-artist {
+        color: #666;
+        font-size: 14px;
+      }
+      .track-duration {
+        color: #999;
+        font-size: 14px;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="playlist" class="playlist">Loading...</div>
+
+    <script src="../dist/soundcloud-audio.js"></script>
+    <script type="module">
+      import config from '../config.js';
+      
+      (function(global) {
+        'use strict';
+
+        var $view = document.getElementById('playlist');
+        var player = new SoundCloudAudio();
+        var currentToken = null;
+
+        function refreshToken() {
+          return fetch('https://api.soundcloud.com/oauth2/token', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/x-www-form-urlencoded'
+            },
+            body: `grant_type=client_credentials&client_id=${config.clientId}&client_secret=${config.clientSecret}`
+          })
+          .then(response => response.json())
+          .then(data => {
+            console.log('New token received');
+            return data.access_token;
+          })
+          .catch(error => {
+            console.error('Error refreshing token:', error);
+          });
+        }
+        
+        // Override the _json method to include Authorization header
+        player._json = function(url, callback) {
+          console.log('Making request to:', url);
+          var xhr = new XMLHttpRequest();
+          xhr.open('GET', url);
+          
+          xhr.setRequestHeader('Authorization', 'OAuth ' + currentToken);
+          
+          xhr.onreadystatechange = function() {
+            if (xhr.readyState === 4) {
+              if (xhr.status === 401) {
+                // Token expired, refresh and retry
+                refreshToken().then(newToken => {
+                  currentToken = newToken;
+                  // Retry the original request
+                  player._json(url, callback);
+                });
+              } else if (xhr.status === 200) {
+                try {
+                  callback(JSON.parse(xhr.responseText));
+                } catch (err) {
+                  console.error('Parse error:', err);
+                }
+              } else {
+                console.error('Request failed:', xhr.status, xhr.responseText);
+              }
+            }
+          };
+
+          xhr.send(null);
+        };
+
+        function formatDuration(ms) {
+          var minutes = Math.floor(ms / 60000);
+          var seconds = ((ms % 60000) / 1000).toFixed(0);
+          return minutes + ":" + (seconds < 10 ? '0' : '') + seconds;
+        }
+
+        function renderPlaylist(playlist) {
+          var html = `
+            <div class="playlist-header">
+              <div class="playlist-artwork">
+                <img src="${playlist.artwork_url ? playlist.artwork_url.replace('large', 't500x500') : 'https://placeholder.com/500x500'}" alt="${playlist.title}">
+              </div>
+              <div class="playlist-details">
+                <h1 class="playlist-title">
+                  <a href="${playlist.permalink_url}" target="_blank">${playlist.title}</a>
+                </h1>
+                <div class="playlist-info">by ${playlist.user.username}</div>
+                <div class="playlist-info">${playlist.track_count} tracks · ${formatDuration(playlist.duration)}</div>
+              </div>
+            </div>
+            <ul class="track-list">
+          `;
+
+          playlist.tracks.forEach(function(track) {
+            html += `
+              <li class="track-item">
+                <img class="track-artwork" src="${track.artwork_url || 'https://placeholder.com/50x50'}" alt="">
+                <div class="track-info">
+                  <div class="track-title">${track.title}</div>
+                  <div class="track-artist">${track.user.username}</div>
+                </div>
+                <div class="track-duration">${formatDuration(track.duration)}</div>
+              </li>
+            `;
+          });
+
+          html += '</ul>';
+          $view.innerHTML = html;
+        }
+
+        // Initial token refresh before loading playlist
+        refreshToken().then(token => {
+          currentToken = token;
+          
+          // Load the playlist
+          try {
+            player.resolve(
+              'https://soundcloud.com/saxurn/sets/santa-pilled-rerock',
+              function(playlist) {
+                renderPlaylist(playlist);
+              }
+            );
+          } catch (e) {
+            console.error('Resolve error:', e);
+            $view.innerHTML = 'Error resolving playlist: ' + e.message;
+          }
+        });
+
+      })(this);
+    </script>
+  </body>
+</html> 
